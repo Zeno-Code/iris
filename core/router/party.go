@@ -3,7 +3,7 @@ package router
 import (
 	"github.com/kataras/iris/context"
 	"github.com/kataras/iris/core/errors"
-	"github.com/kataras/iris/core/router/macro"
+	"github.com/kataras/iris/macro"
 )
 
 // Party is just a group joiner of routes which have the same prefix and share same middleware(s) also.
@@ -18,11 +18,11 @@ type Party interface {
 	GetRelPath() string
 	// GetReporter returns the reporter for adding errors
 	GetReporter() *errors.Reporter
-	// Macros returns the macro map which is responsible
-	// to register custom macro functions for all routes.
+	// Macros returns the macro collection that is responsible
+	// to register custom macros with their own parameter types and their macro functions for all routes.
 	//
 	// Learn more at:  https://github.com/kataras/iris/tree/master/_examples/routing/dynamic-path
-	Macros() *macro.Map
+	Macros() *macro.Macros
 
 	// Party groups routes which may have the same prefix and share same handlers,
 	// returns that new rich subrouter.
@@ -61,7 +61,8 @@ type Party interface {
 	// The difference from .Use is that this/or these Handler(s) are being always running last.
 	Done(handlers ...context.Handler)
 	// Reset removes all the begin and done handlers that may derived from the parent party via `Use` & `Done`,
-	// note that the `Reset` will not reset the handlers that are registered via `UseGlobal` & `DoneGlobal`.
+	// and the execution rules.
+	// Note that the `Reset` will not reset the handlers that are registered via `UseGlobal` & `DoneGlobal`.
 	//
 	// Returns this Party.
 	Reset() Party
@@ -73,6 +74,30 @@ type Party interface {
 	// Call of `AllowMethod` will override any previous allow methods.
 	AllowMethods(methods ...string) Party
 
+	// SetExecutionRules alters the execution flow of the route handlers outside of the handlers themselves.
+	//
+	// For example, if for some reason the desired result is the (done or all) handlers to be executed no matter what
+	// even if no `ctx.Next()` is called in the previous handlers, including the begin(`Use`),
+	// the main(`Handle`) and the done(`Done`) handlers themselves, then:
+	// Party#SetExecutionRules(iris.ExecutionRules {
+	//   Begin: iris.ExecutionOptions{Force: true},
+	//   Main:  iris.ExecutionOptions{Force: true},
+	//   Done:  iris.ExecutionOptions{Force: true},
+	// })
+	//
+	// Note that if : true then the only remained way to "break" the handler chain is by `ctx.StopExecution()` now that `ctx.Next()` does not matter.
+	//
+	// These rules are per-party, so if a `Party` creates a child one then the same rules will be applied to that as well.
+	// Reset of these rules (before `Party#Handle`) can be done with `Party#SetExecutionRules(iris.ExecutionRules{})`.
+	//
+	// The most common scenario for its use can be found inside Iris MVC Applications;
+	// when we want the `Done` handlers of that specific mvc app's `Party`
+	// to be executed but we don't want to add `ctx.Next()` on the `OurController#EndRequest`.
+	//
+	// Returns this Party.
+	//
+	// Example: https://github.com/kataras/iris/tree/master/_examples/mvc/middleware/without-ctx-next
+	SetExecutionRules(executionRules ExecutionRules) Party
 	// Handle registers a route to the server's router.
 	// if empty method is passed then handler(s) are being registered to all methods, same as .Any.
 	//
@@ -85,10 +110,10 @@ type Party interface {
 	// otherwise use `Party` which can handle many paths with different handlers and middlewares.
 	//
 	// Usage:
-	// 	app.HandleMany(iris.MethodGet, "/user /user/{id:int} /user/me", userHandler)
+	// 	app.HandleMany(iris.MethodGet, "/user /user/{id:uint64} /user/me", userHandler)
 	// At the other side, with `Handle` we've had to write:
 	// 	app.Handle(iris.MethodGet, "/user", userHandler)
-	// 	app.Handle(iris.MethodGet, "/user/{id:int}", userHandler)
+	// 	app.Handle(iris.MethodGet, "/user/{id:uint64}", userHandler)
 	// 	app.Handle(iris.MethodGet, "/user/me", userHandler)
 	//
 	// This method is used behind the scenes at the `Controller` function

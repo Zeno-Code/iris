@@ -6,10 +6,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/coreos/bbolt"
-	"github.com/kataras/golog"
 	"github.com/kataras/iris/core/errors"
 	"github.com/kataras/iris/sessions"
+
+	bolt "github.com/etcd-io/bbolt"
+	"github.com/kataras/golog"
 )
 
 // DefaultFileMode used as the default database's "fileMode"
@@ -173,7 +174,8 @@ func (db *Database) Acquire(sid string, expires time.Duration) (lifetime session
 					return err
 				}
 
-				if err := b.Put(expirationKey, timeBytes); err == nil {
+				err = b.Put(expirationKey, timeBytes)
+				if err == nil {
 					// create the session bucket now, so the rest of the calls can be easly get the bucket without any further checks.
 					_, err = root.CreateBucket(bsid)
 				}
@@ -208,6 +210,33 @@ func (db *Database) Acquire(sid string, expires time.Duration) (lifetime session
 	}
 
 	return
+}
+
+// OnUpdateExpiration will re-set the database's session's entry ttl.
+func (db *Database) OnUpdateExpiration(sid string, newExpires time.Duration) error {
+	expirationTime := time.Now().Add(newExpires)
+	timeBytes, err := sessions.DefaultTranscoder.Marshal(expirationTime)
+	if err != nil {
+		return err
+	}
+
+	err = db.Service.Update(func(tx *bolt.Tx) error {
+		expirationName := getExpirationBucketName([]byte(sid))
+		root := db.getBucket(tx)
+		b := root.Bucket(expirationName)
+		if b == nil {
+			// golog.Debugf("tried to reset the expiration value for '%s' while its configured lifetime is unlimited or the session is already expired and not found now", sid)
+			return sessions.ErrNotFound
+		}
+
+		return b.Put(expirationKey, timeBytes)
+	})
+
+	if err != nil {
+		golog.Debugf("unable to reset the expiration value for '%s': %v", sid, err)
+	}
+
+	return err
 }
 
 func makeKey(key string) []byte {
@@ -300,14 +329,12 @@ func (db *Database) Len(sid string) (n int) {
 	return
 }
 
-var errNotFound = errors.New("not found")
-
 // Delete removes a session key value based on its key.
 func (db *Database) Delete(sid string, key string) (deleted bool) {
 	err := db.Service.Update(func(tx *bolt.Tx) error {
 		b := db.getBucketForSession(tx, sid)
 		if b == nil {
-			return errNotFound
+			return sessions.ErrNotFound
 		}
 
 		return b.Delete(makeKey(key))
@@ -337,13 +364,10 @@ func (db *Database) Release(sid string) {
 		// delete the session bucket.
 		b := db.getBucket(tx)
 		bsid := []byte(sid)
-		if err := b.DeleteBucket(bsid); err != nil {
-			return err
-		}
-
-		// and try to delete the associated expiration bucket, if exists, ignore error.
+		// try to delete the associated expiration bucket, if exists, ignore error.
 		b.DeleteBucket(getExpirationBucketName(bsid))
-		return nil
+
+		return b.DeleteBucket(bsid)
 	})
 }
 

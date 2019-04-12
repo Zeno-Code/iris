@@ -110,9 +110,9 @@ app := iris.New()
 users := app.Party("/users", myAuthMiddlewareHandler)
 
 // http://localhost:8080/users/42/profile
-users.Get("/{id:int}/profile", userProfileHandler)
+users.Get("/{id:uint64}/profile", userProfileHandler)
 // http://localhost:8080/users/messages/1
-users.Get("/inbox/{id:int}", userMessageHandler)
+users.Get("/inbox/{id:uint64}", userMessageHandler)
 ```
 
 The same could be also written using a function which accepts the child router(the Party).
@@ -124,13 +124,13 @@ app.PartyFunc("/users", func(users iris.Party) {
     users.Use(myAuthMiddlewareHandler)
 
     // http://localhost:8080/users/42/profile
-    users.Get("/{id:int}/profile", userProfileHandler)
+    users.Get("/{id:uint64}/profile", userProfileHandler)
     // http://localhost:8080/users/messages/1
-    users.Get("/inbox/{id:int}", userMessageHandler)
+    users.Get("/inbox/{id:uint64}", userMessageHandler)
 })
 ```
 
-> `id:int` is a (typed) dynamic path parameter, learn more by scrolling down.
+> `id:uint` is a (typed) dynamic path parameter, learn more by scrolling down.
 
 # Dynamic Path Parameters
 
@@ -152,23 +152,71 @@ Standard macro types for route path parameters
 | {param:string}         |
 +------------------------+
 string type
-anything
+anything (single path segmnent)
 
-+------------------------+
-| {param:int}            |
-+------------------------+
++-------------------------------+
+| {param:int}                   |
++-------------------------------+
 int type
-only numbers (0-9)
+-9223372036854775808 to 9223372036854775807 (x64) or -2147483648 to 2147483647 (x32), depends on the host arch
 
 +------------------------+
-| {param:long}           |
+| {param:int8}           |
++------------------------+
+int8 type
+-128 to 127
+
++------------------------+
+| {param:int16}          |
++------------------------+
+int16 type
+-32768 to 32767
+
++------------------------+
+| {param:int32}          |
++------------------------+
+int32 type
+-2147483648 to 2147483647
+
++------------------------+
+| {param:int64}          |
 +------------------------+
 int64 type
-only numbers (0-9)
+-9223372036854775808 to 9223372036854775807
 
 +------------------------+
-| {param:boolean}        |
+| {param:uint}           |
 +------------------------+
+uint type
+0 to 18446744073709551615 (x64) or 0 to 4294967295 (x32)
+
++------------------------+
+| {param:uint8}          |
++------------------------+
+uint8 type
+0 to 255
+
++------------------------+
+| {param:uint16}         |
++------------------------+
+uint16 type
+0 to 65535
+
++------------------------+
+| {param:uint32}          |
++------------------------+
+uint32 type
+0 to 4294967295
+
++------------------------+
+| {param:uint64}         |
++------------------------+
+uint64 type
+0 to 18446744073709551615
+
++---------------------------------+
+| {param:bool} or {param:boolean} |
++---------------------------------+
 bool type
 only "1" or "t" or "T" or "TRUE" or "true" or "True"
 or "0" or "f" or "F" or "FALSE" or "false" or "False"
@@ -194,8 +242,8 @@ no spaces ! or other character
 | {param:path}           |
 +------------------------+
 path type
-anything, should be the last part, more than one path segment,
-i.e: /path1/path2/path3 , ctx.Params().Get("param") == "/path1/path2/path3"
+anything, should be the last part, can be more than one path segment,
+i.e: "/test/*param" and request: "/test/path1/path2/path3" , ctx.Params().Get("param") == "path1/path2/path3"
 ```
 
 If type is missing then parameter's type is defaulted to string, so
@@ -209,18 +257,24 @@ you are able to register your own too!.
 Register a named path parameter function
 
 ```go
-app.Macros().Int.RegisterFunc("min", func(argument int) func(paramValue string) bool {
+app.Macros().Get("int").RegisterFunc("min", func(argument int) func(paramValue int) bool {
     // [...]
-    return true 
-    // -> true means valid, false means invalid fire 404 or if "else 500" is appended to the macro syntax then internal server error.
+    return func(paramValue int) bool {
+         // -> true means valid, false means invalid fire 404
+         // or if "else 500" is appended to the macro syntax then internal server error.
+        return true 
+    }
 })
 ```
 
-At the `func(argument ...)` you can have any standard type, it will be validated before the server starts so don't care about any performance cost there, the only thing it runs at serve time is the returning `func(paramValue string) bool`.
+At the `func(argument ...)` you can have any standard type, it will be validated before the server starts so don't care about any performance cost there, the only thing it runs at serve time is the returning `func(paramValue <T>) bool`.
 
 ```go
-{param:string equal(iris)} , "iris" will be the argument here:
-app.Macros().String.RegisterFunc("equal", func(argument string) func(paramValue string) bool {
+{param:string equal(iris)}
+```
+The "iris" will be the argument here:
+```go
+app.Macros().Get("string").RegisterFunc("equal", func(argument string) func(paramValue string) bool {
     return func(paramValue string){ return argument == paramValue }
 })
 ```
@@ -237,38 +291,34 @@ app.Get("/username/{name}", func(ctx iris.Context) {
 // Let's register our first macro attached to int macro type.
 // "min" = the function
 // "minValue" = the argument of the function
-// func(string) bool = the macro's path parameter evaluator, this executes in serve time when
+// func(<T>) bool = the macro's path parameter evaluator, this executes in serve time when
 // a user requests a path which contains the :int macro type with the min(...) macro parameter function.
-app.Macros().Int.RegisterFunc("min", func(minValue int) func(string) bool {
+app.Macros().Get("int").RegisterFunc("min", func(minValue int) func(int) bool {
     // do anything before serve here [...]
     // at this case we don't need to do anything
-    return func(paramValue string) bool {
-        n, err := strconv.Atoi(paramValue)
-        if err != nil {
-            return false
-        }
-        return n >= minValue
+    return func(paramValue int) bool {
+        return paramValue >= minValue
     }
 })
 
 // http://localhost:8080/profile/id>=1
 // this will throw 404 even if it's found as route on : /profile/0, /profile/blabla, /profile/-1
 // macro parameter functions are optional of course.
-app.Get("/profile/{id:int min(1)}", func(ctx iris.Context) {
+app.Get("/profile/{id:uint64 min(1)}", func(ctx iris.Context) {
     // second parameter is the error but it will always nil because we use macros,
     // the validaton already happened.
-    id, _ := ctx.Params().GetInt("id")
+    id, _ := ctx.Params().GetUint64("id")
     ctx.Writef("Hello id: %d", id)
 })
 
 // to change the error code per route's macro evaluator:
-app.Get("/profile/{id:int min(1)}/friends/{friendid:int min(1) else 504}", func(ctx iris.Context) {
-    id, _ := ctx.Params().GetInt("id")
-    friendid, _ := ctx.Params().GetInt("friendid")
+app.Get("/profile/{id:uint64 min(1)}/friends/{friendid:uint64 min(1) else 504}", func(ctx iris.Context) {
+    id, _ := ctx.Params().GetUint64("id")
+    friendid, _ := ctx.Params().GetUint64("friendid")
     ctx.Writef("Hello id: %d looking for friend id: ", id, friendid)
 }) // this will throw e 504 error code instead of 404 if all route's macros not passed.
 
-// http://localhost:8080/game/a-zA-Z/level/0-9
+// http://localhost:8080/game/a-zA-Z/level/42
 // remember, alphabetical is lowercase or uppercase letters only.
 app.Get("/game/{name:alphabetical}/level/{level:int}", func(ctx iris.Context) {
     ctx.Writef("name: %s | level: %s", ctx.Params().Get("name"), ctx.Params().Get("level"))
@@ -297,12 +347,10 @@ app.Run(iris.Addr(":8080"))
 }
 ```
 
-A **path parameter name should contain only alphabetical letters. Symbols like  '_' and numbers are NOT allowed**.
-
+A path parameter name should contain only alphabetical letters or digits. Symbols like  '_' are NOT allowed.
 Last, do not confuse `ctx.Params()` with `ctx.Values()`.
-Path parameter's values goes to `ctx.Params()` and context's local storage
-that can be used to communicate between handlers and middleware(s) goes to
-`ctx.Values()`.
+Path parameter's values can be retrieved from `ctx.Params()`,
+context's local storage that can be used to communicate between handlers and middleware(s) can be stored to `ctx.Values()`.
 
 # Routing and reverse lookups
 
@@ -676,6 +724,14 @@ type Context interface {
     // was being registered to this request's path.
     GetCurrentRoute() RouteReadOnly
 
+    // Do calls the SetHandlers(handlers)
+    // and executes the first handler,
+    // handlers should not be empty.
+    //
+    // It's used by the router, developers may use that
+    // to replace and execute handlers immediately.
+    Do(Handlers)
+
     // AddHandler can add handler(s)
     // to the current request in serve-time,
     // these handlers are not persistenced to the router.
@@ -697,6 +753,43 @@ type Context interface {
     //
     // Look Handlers(), Next() and StopExecution() too.
     HandlerIndex(n int) (currentIndex int)
+    // Proceed is an alternative way to check if a particular handler
+    // has been executed and called the `ctx.Next` function inside it.
+    // This is useful only when you run a handler inside
+    // another handler. It justs checks for before index and the after index.
+    //
+    // A usecase example is when you want to execute a middleware
+    // inside controller's `BeginRequest` that calls the `ctx.Next` inside it.
+    // The Controller looks the whole flow (BeginRequest, method handler, EndRequest)
+    // as one handler, so `ctx.Next` will not be reflected to the method handler
+    // if called from the `BeginRequest`.
+    //
+    // Although `BeginRequest` should NOT be used to call other handlers,
+    // the `BeginRequest` has been introduced to be able to set
+    // common data to all method handlers before their execution.
+    // Controllers can accept middleware(s) from the MVC's Application's Router as normally.
+    //
+    // That said let's see an example of `ctx.Proceed`:
+    //
+    // var authMiddleware = basicauth.New(basicauth.Config{
+    // 	Users: map[string]string{
+    // 		"admin": "password",
+    // 	},
+    // })
+    //
+    // func (c *UsersController) BeginRequest(ctx iris.Context) {
+    // 	if !ctx.Proceed(authMiddleware) {
+    // 		ctx.StopExecution()
+    // 	}
+    // }
+    // This Get() will be executed in the same handler as `BeginRequest`,
+    // internally controller checks for `ctx.StopExecution`.
+    // So it will not be fired if BeginRequest called the `StopExecution`.
+    // func(c *UsersController) Get() []models.User {
+    //	  return c.Service.GetAll()
+    //}
+    // Alternative way is `!ctx.IsStopped()` if middleware make use of the `ctx.StopExecution()` on failure.
+    Proceed(Handler) bool
     // HandlerName returns the current handler's name, helpful for debugging.
     HandlerName() string
     // Next calls all the next handler from the handlers chain,
@@ -704,18 +797,59 @@ type Context interface {
     //
     // Note: Custom context should override this method in order to be able to pass its own context.Context implementation.
     Next()
-    // NextHandler returns(but it is NOT executes) the next handler from the handlers chain.
+    // NextOr checks if chain has a next handler, if so then it executes it
+    // otherwise it sets a new chain assigned to this Context based on the given handler(s)
+    // and executes its first handler.
+    //
+    // Returns true if next handler exists and executed, otherwise false.
+    //
+    // Note that if no next handler found and handlers are missing then
+    // it sends a Status Not Found (404) to the client and it stops the execution.
+    NextOr(handlers ...Handler) bool
+    // NextOrNotFound checks if chain has a next handler, if so then it executes it
+    // otherwise it sends a Status Not Found (404) to the client and stops the execution.
+    //
+    // Returns true if next handler exists and executed, otherwise false.
+    NextOrNotFound() bool
+    // NextHandler returns (it doesn't execute) the next handler from the handlers chain.
     //
     // Use .Skip() to skip this handler if needed to execute the next of this returning handler.
     NextHandler() Handler
     // Skip skips/ignores the next handler from the handlers chain,
     // it should be used inside a middleware.
     Skip()
-    // StopExecution if called then the following .Next calls are ignored.
+    // StopExecution if called then the following .Next calls are ignored,
+    // as a result the next handlers in the chain will not be fire.
     StopExecution()
     // IsStopped checks and returns true if the current position of the Context is 255,
     // means that the StopExecution() was called.
     IsStopped() bool
+    // OnConnectionClose registers the "cb" function which will fire (on its own goroutine, no need to be registered goroutine by the end-dev)
+    // when the underlying connection has gone away.
+    //
+    // This mechanism can be used to cancel long operations on the server
+    // if the client has disconnected before the response is ready.
+    //
+    // It depends on the `http#CloseNotify`.
+    // CloseNotify may wait to notify until Request.Body has been
+    // fully read.
+    //
+    // After the main Handler has returned, there is no guarantee
+    // that the channel receives a value.
+    //
+    // Finally, it reports whether the protocol supports pipelines (HTTP/1.1 with pipelines disabled is not supported).
+    // The "cb" will not fire for sure if the output value is false.
+    //
+    // Note that you can register only one callback for the entire request handler chain/per route.
+    //
+    // Look the `ResponseWriter#CloseNotifier` for more.
+    OnConnectionClose(fnGoroutine func()) bool
+    // OnClose registers the callback function "cb" to the underline connection closing event using the `Context#OnConnectionClose`
+    // and also in the end of the request handler using the `ResponseWriter#SetBeforeFlush`.
+    // Note that you can register only one callback for the entire request handler chain/per route.
+    //
+    // Look the `Context#OnConnectionClose` and `ResponseWriter#SetBeforeFlush` for more.
+    OnClose(cb func())
 
     //  +------------------------------------------------------------+
     //  | Current "user/request" storage                             |
@@ -759,6 +893,8 @@ type Context interface {
     // Subdomain returns the subdomain of this request, if any.
     // Note that this is a fast method which does not cover all cases.
     Subdomain() (subdomain string)
+    // IsWWW returns true if the current subdomain (if any) is www.
+    IsWWW() bool
     // RemoteAddr tries to parse and return the real client's request IP.
     //
     // Based on allowed headers names that can be modified from Configuration.RemoteAddrHeaders.
@@ -787,9 +923,18 @@ type Context interface {
     // Read more at: https://developer.mozilla.org/en-US/docs/AJAX
     // and https://xhr.spec.whatwg.org/
     IsAjax() bool
-
+    // IsMobile checks if client is using a mobile device(phone or tablet) to communicate with this server.
+    // If the return value is true that means that the http client using a mobile
+    // device to communicate with the server, otherwise false.
+    //
+    // Keep note that this checks the "User-Agent" request header.
+    IsMobile() bool
+    // GetReferrer extracts and returns the information from the "Referer" header as specified
+    // in https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Referrer-Policy
+    // or by the URL query parameter "referer".
+    GetReferrer() Referrer
     //  +------------------------------------------------------------+
-    //  | Response Headers helpers                                   |
+    //  | Headers helpers                                            |
     //  +------------------------------------------------------------+
 
     // Header adds a header to the response writer.
@@ -800,52 +945,177 @@ type Context interface {
     // GetContentType returns the response writer's header value of "Content-Type"
     // which may, setted before with the 'ContentType'.
     GetContentType() string
+    // GetContentType returns the request's header value of "Content-Type".
+    GetContentTypeRequested() string
+
+    // GetContentLength returns the request's header value of "Content-Length".
+    // Returns 0 if header was unable to be found or its value was not a valid number.
+    GetContentLength() int64
 
     // StatusCode sets the status code header to the response.
-    // Look .GetStatusCode too.
+    // Look .`GetStatusCode` too.
     StatusCode(statusCode int)
     // GetStatusCode returns the current status code of the response.
-    // Look StatusCode too.
+    // Look `StatusCode` too.
     GetStatusCode() int
 
-    // Redirect redirect sends a redirect response the client
+    // Redirect sends a redirect response to the client
+    // to a specific url or relative path.
     // accepts 2 parameters string and an optional int
     // first parameter is the url to redirect
-    // second parameter is the http status should send, default is 302 (StatusFound),
-    // you can set it to 301 (Permant redirect), if that's nessecery
+    // second parameter is the http status should send,
+    // default is 302 (StatusFound),
+    // you can set it to 301 (Permant redirect)
+    // or 303 (StatusSeeOther) if POST method,
+    // or StatusTemporaryRedirect(307) if that's nessecery.
     Redirect(urlToRedirect string, statusHeader ...int)
 
     //  +------------------------------------------------------------+
     //  | Various Request and Post Data                              |
     //  +------------------------------------------------------------+
 
-    // URLParam returns the get parameter from a request , if any.
+    // URLParam returns true if the url parameter exists, otherwise false.
+    URLParamExists(name string) bool
+    // URLParamDefault returns the get parameter from a request,
+    // if not found then "def" is returned.
+    URLParamDefault(name string, def string) string
+    // URLParam returns the get parameter from a request, if any.
     URLParam(name string) string
+    // URLParamTrim returns the url query parameter with trailing white spaces removed from a request.
+    URLParamTrim(name string) string
+    // URLParamTrim returns the escaped url query parameter from a request.
+    URLParamEscape(name string) string
     // URLParamInt returns the url query parameter as int value from a request,
-    // returns an error if parse failed.
+    // returns -1 and an error if parse failed.
     URLParamInt(name string) (int, error)
+    // URLParamIntDefault returns the url query parameter as int value from a request,
+    // if not found or parse failed then "def" is returned.
+    URLParamIntDefault(name string, def int) int
+    // URLParamInt32Default returns the url query parameter as int32 value from a request,
+    // if not found or parse failed then "def" is returned.
+    URLParamInt32Default(name string, def int32) int32
     // URLParamInt64 returns the url query parameter as int64 value from a request,
-    // returns an error if parse failed.
+    // returns -1 and an error if parse failed.
     URLParamInt64(name string) (int64, error)
+    // URLParamInt64Default returns the url query parameter as int64 value from a request,
+    // if not found or parse failed then "def" is returned.
+    URLParamInt64Default(name string, def int64) int64
+    // URLParamFloat64 returns the url query parameter as float64 value from a request,
+    // returns -1 and an error if parse failed.
+    URLParamFloat64(name string) (float64, error)
+    // URLParamFloat64Default returns the url query parameter as float64 value from a request,
+    // if not found or parse failed then "def" is returned.
+    URLParamFloat64Default(name string, def float64) float64
+    // URLParamBool returns the url query parameter as boolean value from a request,
+    // returns an error if parse failed or not found.
+    URLParamBool(name string) (bool, error)
     // URLParams returns a map of GET query parameters separated by comma if more than one
     // it returns an empty map if nothing found.
     URLParams() map[string]string
 
-    // FormValue returns a single form value by its name/key
+    // FormValueDefault returns a single parsed form value by its "name",
+    // including both the URL field's query parameters and the POST or PUT form data.
+    //
+    // Returns the "def" if not found.
+    FormValueDefault(name string, def string) string
+    // FormValue returns a single parsed form value by its "name",
+    // including both the URL field's query parameters and the POST or PUT form data.
     FormValue(name string) string
-    // FormValues returns all post data values with their keys
-    // form data, get, post & put query arguments
+    // FormValues returns the parsed form data, including both the URL
+    // field's query parameters and the POST or PUT form data.
+    //
+    // The default form's memory maximum size is 32MB, it can be changed by the
+    // `iris#WithPostMaxMemory` configurator at main configuration passed on `app.Run`'s second argument.
     //
     // NOTE: A check for nil is necessary.
     FormValues() map[string][]string
-    // PostValue returns a form's only-post value by its name,
-    // same as Request.PostFormValue.
-    PostValue(name string) string
-    // FormFile returns the first file for the provided form key.
-    // FormFile calls ctx.Request.ParseMultipartForm and ParseForm if necessary.
+
+    // PostValueDefault returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name".
     //
-    // same as Request.FormFile.
+    // If not found then "def" is returned instead.
+    PostValueDefault(name string, def string) string
+    // PostValue returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name"
+    PostValue(name string) string
+    // PostValueTrim returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name",  without trailing spaces.
+    PostValueTrim(name string) string
+    // PostValueInt returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as int.
+    //
+    // If not found returns -1 and a non-nil error.
+    PostValueInt(name string) (int, error)
+    // PostValueIntDefault returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as int.
+    //
+    // If not found returns or parse errors the "def".
+    PostValueIntDefault(name string, def int) int
+    // PostValueInt64 returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as float64.
+    //
+    // If not found returns -1 and a no-nil error.
+    PostValueInt64(name string) (int64, error)
+    // PostValueInt64Default returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as int64.
+    //
+    // If not found or parse errors returns the "def".
+    PostValueInt64Default(name string, def int64) int64
+    // PostValueInt64Default returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as float64.
+    //
+    // If not found returns -1 and a non-nil error.
+    PostValueFloat64(name string) (float64, error)
+    // PostValueInt64Default returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as float64.
+    //
+    // If not found or parse errors returns the "def".
+    PostValueFloat64Default(name string, def float64) float64
+    // PostValueInt64Default returns the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name", as bool.
+    //
+    // If not found or value is false, then it returns false, otherwise true.
+    PostValueBool(name string) (bool, error)
+    // PostValues returns all the parsed form data from POST, PATCH,
+    // or PUT body parameters based on a "name" as a string slice.
+    //
+    // The default form's memory maximum size is 32MB, it can be changed by the
+    // `iris#WithPostMaxMemory` configurator at main configuration passed on `app.Run`'s second argument.
+    PostValues(name string) []string
+    // FormFile returns the first uploaded file that received from the client.
+    //
+    // The default form's memory maximum size is 32MB, it can be changed by the
+    //  `iris#WithPostMaxMemory` configurator at main configuration passed on `app.Run`'s second argument.
+    //
+    // Example: https://github.com/kataras/iris/tree/master/_examples/http_request/upload-file
     FormFile(key string) (multipart.File, *multipart.FileHeader, error)
+    // UploadFormFiles uploads any received file(s) from the client
+    // to the system physical location "destDirectory".
+    //
+    // The second optional argument "before" gives caller the chance to
+    // modify the *miltipart.FileHeader before saving to the disk,
+    // it can be used to change a file's name based on the current request,
+    // all FileHeader's options can be changed. You can ignore it if
+    // you don't need to use this capability before saving a file to the disk.
+    //
+    // Note that it doesn't check if request body streamed.
+    //
+    // Returns the copied length as int64 and
+    // a not nil error if at least one new file
+    // can't be created due to the operating system's permissions or
+    // http.ErrMissingFile if no file received.
+    //
+    // If you want to receive & accept files and manage them manually you can use the `context#FormFile`
+    // instead and create a copy function that suits your needs, the below is for generic usage.
+    //
+    // The default form's memory maximum size is 32MB, it can be changed by the
+    //  `iris#WithPostMaxMemory` configurator at main configuration passed on `app.Run`'s second argument.
+    //
+    // See `FormFile` to a more controlled to receive a file.
+    //
+    //
+    // Example: https://github.com/kataras/iris/tree/master/_examples/http_request/upload-files
+    UploadFormFiles(destDirectory string, before ...func(Context, *multipart.FileHeader)) (n int64, err error)
 
     //  +------------------------------------------------------------+
     //  | Custom HTTP Errors                                         |
@@ -867,16 +1137,29 @@ type Context interface {
     // should be called before reading the request body from the client.
     SetMaxRequestBodySize(limitOverBytes int64)
 
-    // UnmarshalBody reads the request's body and binds it to a value or pointer of any type
+    // UnmarshalBody reads the request's body and binds it to a value or pointer of any type.
     // Examples of usage: context.ReadJSON, context.ReadXML.
-    UnmarshalBody(v interface{}, unmarshaler Unmarshaler) error
-    // ReadJSON reads JSON from request's body and binds it to a value of any json-valid type.
-    ReadJSON(jsonObject interface{}) error
-    // ReadXML reads XML from request's body and binds it to a value of any xml-valid type.
-    ReadXML(xmlObject interface{}) error
+    //
+    // Example: https://github.com/kataras/iris/blob/master/_examples/http_request/read-custom-via-unmarshaler/main.go
+    //
+    // UnmarshalBody does not check about gzipped data.
+    // Do not rely on compressed data incoming to your server. The main reason is: https://en.wikipedia.org/wiki/Zip_bomb
+    // However you are still free to read the `ctx.Request().Body io.Reader` manually.
+    UnmarshalBody(outPtr interface{}, unmarshaler Unmarshaler) error
+    // ReadJSON reads JSON from request's body and binds it to a pointer of a value of any json-valid type.
+    //
+    // Example: https://github.com/kataras/iris/blob/master/_examples/http_request/read-json/main.go
+    ReadJSON(jsonObjectPtr interface{}) error
+    // ReadXML reads XML from request's body and binds it to a pointer of a value of any xml-valid type.
+    //
+    // Example: https://github.com/kataras/iris/blob/master/_examples/http_request/read-xml/main.go
+    ReadXML(xmlObjectPtr interface{}) error
     // ReadForm binds the formObject  with the form data
-    // it supports any kind of struct.
-    ReadForm(formObject interface{}) error
+    // it supports any kind of type, including custom structs.
+    // It will return nothing if request data are empty.
+    //
+    // Example: https://github.com/kataras/iris/blob/master/_examples/http_request/read-form/main.go
+    ReadForm(formObjectPtr interface{}) error
 
     //  +------------------------------------------------------------+
     //  | Body (raw) Writers                                         |
@@ -910,6 +1193,39 @@ type Context interface {
     //
     // Returns the number of bytes written and any write error encountered.
     WriteString(body string) (int, error)
+
+    // SetLastModified sets the "Last-Modified" based on the "modtime" input.
+    // If "modtime" is zero then it does nothing.
+    //
+    // It's mostly internally on core/router and context packages.
+    //
+    // Note that modtime.UTC() is being used instead of just modtime, so
+    // you don't have to know the internals in order to make that works.
+    SetLastModified(modtime time.Time)
+    // CheckIfModifiedSince checks if the response is modified since the "modtime".
+    // Note that it has nothing to do with server-side caching.
+    // It does those checks by checking if the "If-Modified-Since" request header
+    // sent by client or a previous server response header
+    // (e.g with WriteWithExpiration or StaticEmbedded or Favicon etc.)
+    // is a valid one and it's before the "modtime".
+    //
+    // A check for !modtime && err == nil is necessary to make sure that
+    // it's not modified since, because it may return false but without even
+    // had the chance to check the client-side (request) header due to some errors,
+    // like the HTTP Method is not "GET" or "HEAD" or if the "modtime" is zero
+    // or if parsing time from the header failed.
+    //
+    // It's mostly used internally, e.g. `context#WriteWithExpiration`.
+    //
+    // Note that modtime.UTC() is being used instead of just modtime, so
+    // you don't have to know the internals in order to make that works.
+    CheckIfModifiedSince(modtime time.Time) (bool, error)
+    // WriteNotModified sends a 304 "Not Modified" status code to the client,
+    // it makes sure that the content type, the content length headers
+    // and any "ETag" are removed before the response sent.
+    //
+    // It's mostly used internally on core/router/fs.go and context methods.
+    WriteNotModified()
     // WriteWithExpiration like Write but it sends with an expiration datetime
     // which is refreshed every package-level `StaticCacheDuration` field.
     WriteWithExpiration(body []byte, modtime time.Time) (int, error)
@@ -936,13 +1252,11 @@ type Context interface {
     ClientSupportsGzip() bool
     // WriteGzip accepts bytes, which are compressed to gzip format and sent to the client.
     // returns the number of bytes written and an error ( if the client doesn' supports gzip compression)
-    //
-    // This function writes temporary gzip contents, the ResponseWriter is untouched.
+    // You may re-use this function in the same handler
+    // to write more data many times without any troubles.
     WriteGzip(b []byte) (int, error)
     // TryWriteGzip accepts bytes, which are compressed to gzip format and sent to the client.
     // If client does not supprots gzip then the contents are written as they are, uncompressed.
-    //
-    // This function writes temporary gzip contents, the ResponseWriter is untouched.
     TryWriteGzip(b []byte) (int, error)
     // GzipResponseWriter converts the current response writer into a response writer
     // which when its .Write called it compress the data to gzip and writes them to the client.
@@ -970,7 +1284,6 @@ type Context interface {
     //
     // Example: https://github.com/kataras/iris/tree/master/_examples/view/context-view-data/
     ViewLayout(layoutTmplFile string)
-
     // ViewData saves one or more key-value pair in order to be passed if and when .View
     // is being called afterwards, in the same request.
     // Useful when need to set or/and change template data from previous hanadlers in the chain.
@@ -990,7 +1303,6 @@ type Context interface {
     //
     // Example: https://github.com/kataras/iris/tree/master/_examples/view/context-view-data/
     ViewData(key string, value interface{})
-
     // GetViewData returns the values registered by `context#ViewData`.
     // The return value is `map[string]interface{}`, this means that
     // if a custom struct registered to ViewData then this function
@@ -1001,16 +1313,20 @@ type Context interface {
     // Similarly to `viewData := ctx.Values().Get("iris.viewData")` or
     // `viewData := ctx.Values().Get(ctx.Application().ConfigurationReadOnly().GetViewDataContextKey())`.
     GetViewData() map[string]interface{}
-
-    // View renders templates based on the adapted view engines.
-    // First argument accepts the filename, relative to the view engine's Directory,
+    // View renders a template based on the registered view engine(s).
+    // First argument accepts the filename, relative to the view engine's Directory and Extension,
     // i.e: if directory is "./templates" and want to render the "./templates/users/index.html"
     // then you pass the "users/index.html" as the filename argument.
     //
-    // Look: .ViewData and .ViewLayout too.
+    // The second optional argument can receive a single "view model"
+    // that will be binded to the view template if it's not nil,
+    // otherwise it will check for previous view data stored by the `ViewData`
+    // even if stored at any previous handler(middleware) for the same request.
     //
-    // Examples: https://github.com/kataras/iris/tree/master/_examples/view/
-    View(filename string) error
+    // Look .ViewData` and .ViewLayout too.
+    //
+    // Examples: https://github.com/kataras/iris/tree/master/_examples/view
+    View(filename string, optionalViewModel ...interface{}) error
 
     // Binary writes out the raw bytes as binary data.
     Binary(data []byte) (int, error)
@@ -1024,9 +1340,10 @@ type Context interface {
     JSONP(v interface{}, options ...JSONP) (int, error)
     // XML marshals the given interface object and writes the XML response.
     XML(v interface{}, options ...XML) (int, error)
-    // Markdown parses the markdown to html and renders to client.
+    // Markdown parses the markdown to html and renders its result to the client.
     Markdown(markdownB []byte, options ...Markdown) (int, error)
-
+    // YAML parses the "v" using the yaml parser and renders its result to the client.
+    YAML(v interface{}) (int, error)
     //  +------------------------------------------------------------+
     //  | Serve files                                                |
     //  +------------------------------------------------------------+
@@ -1034,18 +1351,23 @@ type Context interface {
     // ServeContent serves content, headers are autoset
     // receives three parameters, it's low-level function, instead you can use .ServeFile(string,bool)/SendFile(string,string)
     //
-    // You can define your own "Content-Type" header also, after this function call
-    // Doesn't implements resuming (by range), use ctx.SendFile instead
+    //
+    // You can define your own "Content-Type" with `context#ContentType`, before this function call.
+    //
+    // This function doesn't support resuming (by range),
+    // use ctx.SendFile or router's `StaticWeb` instead.
     ServeContent(content io.ReadSeeker, filename string, modtime time.Time, gzipCompression bool) error
-    // ServeFile serves a view file, to send a file ( zip for example) to the client you should use the SendFile(serverfilename,clientfilename)
+    // ServeFile serves a file (to send a file, a zip for example to the client you should use the `SendFile` instead)
     // receives two parameters
     // filename/path (string)
     // gzipCompression (bool)
     //
-    // You can define your own "Content-Type" header also, after this function call
-    // This function doesn't implement resuming (by range), use ctx.SendFile instead
+    // You can define your own "Content-Type" with `context#ContentType`, before this function call.
     //
-    // Use it when you want to serve css/js/... files to the client, for bigger files and 'force-download' use the SendFile.
+    // This function doesn't support resuming (by range),
+    // use ctx.SendFile or router's `StaticWeb` instead.
+    //
+    // Use it when you want to serve dynamic files to the client.
     ServeFile(filename string, gzipCompression bool) error
     // SendFile sends file for force-download to the client
     //
@@ -1056,18 +1378,41 @@ type Context interface {
     //  | Cookies                                                    |
     //  +------------------------------------------------------------+
 
-    // SetCookie adds a cookie
-    SetCookie(cookie *http.Cookie)
-    // SetCookieKV adds a cookie, receives just a name(string) and a value(string)
+    // SetCookie adds a cookie.
+    // Use of the "options" is not required, they can be used to amend the "cookie".
     //
-    // If you use this method, it expires at 2 hours
-    // use ctx.SetCookie or http.SetCookie if you want to change more fields.
-    SetCookieKV(name, value string)
+    // Example: https://github.com/kataras/iris/tree/master/_examples/cookies/basic
+    SetCookie(cookie *http.Cookie, options ...CookieOption)
+    // SetCookieKV adds a cookie, requires the name(string) and the value(string).
+    //
+    // By default it expires at 2 hours and it's added to the root path,
+    // use the `CookieExpires` and `CookiePath` to modify them.
+    // Alternatively: ctx.SetCookie(&http.Cookie{...})
+    //
+    // If you want to set custom the path:
+    // ctx.SetCookieKV(name, value, iris.CookiePath("/custom/path/cookie/will/be/stored"))
+    //
+    // If you want to be visible only to current request path:
+    // ctx.SetCookieKV(name, value, iris.CookieCleanPath/iris.CookiePath(""))
+    // More:
+    //                              iris.CookieExpires(time.Duration)
+    //                              iris.CookieHTTPOnly(false)
+    //
+    // Example: https://github.com/kataras/iris/tree/master/_examples/cookies/basic
+    SetCookieKV(name, value string, options ...CookieOption)
     // GetCookie returns cookie's value by it's name
     // returns empty string if nothing was found.
-    GetCookie(name string) string
-    // RemoveCookie deletes a cookie by it's name.
-    RemoveCookie(name string)
+    //
+    // If you want more than the value then:
+    // cookie, err := ctx.Request().Cookie("name")
+    //
+    // Example: https://github.com/kataras/iris/tree/master/_examples/cookies/basic
+    GetCookie(name string, options ...CookieOption) string
+    // RemoveCookie deletes a cookie by it's name and path = "/".
+    // Tip: change the cookie's path to the current one by: RemoveCookie("name", iris.CookieCleanPath)
+    //
+    // Example: https://github.com/kataras/iris/tree/master/_examples/cookies/basic
+    RemoveCookie(name string, options ...CookieOption)
     // VisitAllCookies takes a visitor which loops
     // on each (request's) cookies' name and value.
     VisitAllCookies(visitor func(name string, value string))
@@ -1112,7 +1457,7 @@ type Context interface {
     // TransactionsSkipped returns true if the transactions skipped or canceled at all.
     TransactionsSkipped() bool
 
-    // Exec calls the framewrok's ServeCtx
+    // Exec calls the `context/Application#ServeCtx`
     // based on this context but with a changed method and path
     // like it was requested by the user, but it is not.
     //
@@ -1135,7 +1480,11 @@ type Context interface {
     // Context's Values and the Session are kept in order to be able to communicate via the result route.
     //
     // It's for extreme use cases, 99% of the times will never be useful for you.
-    Exec(method string, path string)
+    Exec(method, path string)
+
+    // RouteExists reports whether a particular route exists
+    // It will search from the current subdomain of context's host, if not inside the root domain.
+    RouteExists(method, path string) bool
 
     // Application returns the iris app instance which belongs to this context.
     // Worth to notice that this function returns an interface
@@ -1143,5 +1492,14 @@ type Context interface {
     // to be executed at serve-time. The full app's fields
     // and methods are not available here for the developer's safety.
     Application() Application
+
+    // String returns the string representation of this request.
+    // Each context has a unique string representation.
+    // It can be used for simple debugging scenarios, i.e print context as string.
+    //
+    // What it returns? A number which declares the length of the
+    // total `String` calls per executable application, followed
+    // by the remote IP (the client) and finally the method:url.
+    String() string
 }
 ```

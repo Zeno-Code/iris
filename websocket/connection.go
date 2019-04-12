@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"strconv"
@@ -125,7 +126,7 @@ type (
 	// (because websocket server automatically leaves from all joined rooms)
 	LeaveRoomFunc func(roomName string)
 	// ErrorFunc is the callback which fires whenever an error occurs
-	ErrorFunc (func(string))
+	ErrorFunc (func(error))
 	// NativeMessageFunc is the callback for native websocket messages, receives one []byte parameter which is the raw client's message
 	NativeMessageFunc func([]byte)
 	// MessageFunc is the second argument to the Emitter's Emit functions.
@@ -133,6 +134,8 @@ type (
 	MessageFunc interface{}
 	// PingFunc is the callback which fires each ping
 	PingFunc func()
+	// PongFunc is the callback which fires on pong message received
+	PongFunc func()
 	// Connection is the front-end API that you will use to communicate with the client side
 	Connection interface {
 		// Emitter implements EmitMessage & Emit
@@ -165,10 +168,12 @@ type (
 		OnError(ErrorFunc)
 		// OnPing  registers a callback which fires on each ping
 		OnPing(PingFunc)
+		// OnPong  registers a callback which fires on pong message received
+		OnPong(PongFunc)
 		// FireOnError can be used to send a custom error message to the connection
 		//
 		// It does nothing more than firing the OnError listeners. It doesn't send anything to the client.
-		FireOnError(errorMessage string)
+		FireOnError(err error)
 		// To defines on what "room" (see Join) the server should send a message
 		// returns an Emmiter(`EmitMessage` & `Emit`) to send messages.
 		To(string) Emitter
@@ -221,6 +226,7 @@ type (
 		onRoomLeaveListeners     []LeaveRoomFunc
 		onErrorListeners         []ErrorFunc
 		onPingListeners          []PingFunc
+		onPongListeners          []PongFunc
 		onNativeMessageListeners []NativeMessageFunc
 		onEventListeners         map[string][]MessageFunc
 		started                  bool
@@ -229,7 +235,7 @@ type (
 		broadcast Emitter // pre-defined emitter that sends message to all except this
 		all       Emitter // pre-defined emitter which sends message to all clients
 
-		// access to the Context, use with causion, you can't use response writer as you imagine.
+		// access to the Context, use with caution, you can't use response writer as you imagine.
 		ctx    context.Context
 		values ConnectionValues
 		server *Server
@@ -244,6 +250,11 @@ type (
 
 var _ Connection = &connection{}
 
+// CloseMessage denotes a close control message. The optional message
+// payload contains a numeric code and text. Use the FormatCloseMessage
+// function to format a close message payload.
+//
+// Use the `Connection#Disconnect` instead.
 const CloseMessage = websocket.CloseMessage
 
 func newConnection(ctx context.Context, s *Server, underlineConn UnderlineConnection, id string) *connection {
@@ -256,6 +267,7 @@ func newConnection(ctx context.Context, s *Server, underlineConn UnderlineConnec
 		onErrorListeners:         make([]ErrorFunc, 0),
 		onNativeMessageListeners: make([]NativeMessageFunc, 0),
 		onEventListeners:         make(map[string][]MessageFunc, 0),
+		onPongListeners:          make([]PongFunc, 0),
 		started:                  false,
 		ctx:                      ctx,
 		server:                   s,
@@ -354,6 +366,13 @@ func (c *connection) fireOnPing() {
 	}
 }
 
+func (c *connection) fireOnPong() {
+	// fire the onPongListeners
+	for i := range c.onPongListeners {
+		c.onPongListeners[i]()
+	}
+}
+
 func (c *connection) startReader() {
 	conn := c.underline
 	hasReadTimeout := c.server.config.ReadTimeout > 0
@@ -363,6 +382,8 @@ func (c *connection) startReader() {
 		if hasReadTimeout {
 			conn.SetReadDeadline(time.Now().Add(c.server.config.ReadTimeout))
 		}
+		//fire all OnPong methods
+		go c.fireOnPong()
 
 		return nil
 	})
@@ -380,7 +401,7 @@ func (c *connection) startReader() {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				c.FireOnError(err.Error())
+				c.FireOnError(err)
 			}
 			break
 		} else {
@@ -394,15 +415,15 @@ func (c *connection) startReader() {
 // messageReceived checks the incoming message and fire the nativeMessage listeners or the event listeners (ws custom message)
 func (c *connection) messageReceived(data []byte) {
 
-	if bytes.HasPrefix(data, websocketMessagePrefixBytes) {
-		customData := string(data)
+	if bytes.HasPrefix(data, c.server.config.EvtMessagePrefix) {
 		//it's a custom ws message
-		receivedEvt := getWebsocketCustomEvent(customData)
-		listeners := c.onEventListeners[receivedEvt]
-		if listeners == nil { // if not listeners for this event exit from here
-			return
+		receivedEvt := c.server.messageSerializer.getWebsocketCustomEvent(data)
+		listeners, ok := c.onEventListeners[string(receivedEvt)]
+		if !ok || len(listeners) == 0 {
+			return // if not listeners for this event exit from here
 		}
-		customMessage, err := websocketMessageDeserialize(receivedEvt, customData)
+
+		customMessage, err := c.server.messageSerializer.deserialize(receivedEvt, data)
 		if customMessage == nil || err != nil {
 			return
 		}
@@ -473,9 +494,13 @@ func (c *connection) OnPing(cb PingFunc) {
 	c.onPingListeners = append(c.onPingListeners, cb)
 }
 
-func (c *connection) FireOnError(errorMessage string) {
+func (c *connection) OnPong(cb PongFunc) {
+	c.onPongListeners = append(c.onPongListeners, cb)
+}
+
+func (c *connection) FireOnError(err error) {
 	for _, cb := range c.onErrorListeners {
-		cb(errorMessage)
+		cb(err)
 	}
 }
 
@@ -487,6 +512,7 @@ func (c *connection) To(to string) Emitter {
 	} else if to == c.id {
 		return c.self
 	}
+
 	// is an emitter to another client/connection
 	return newEmitter(c, to)
 }
@@ -555,7 +581,14 @@ func (c *connection) Wait() {
 	c.startReader()
 }
 
+// ErrAlreadyDisconnected can be reported on the `Connection#Disconnect` function whenever the caller tries to close the
+// connection when it is already closed by the client or the caller previously.
+var ErrAlreadyDisconnected = errors.New("already disconnected")
+
 func (c *connection) Disconnect() error {
+	if c == nil || c.disconnected {
+		return ErrAlreadyDisconnected
+	}
 	return c.server.Disconnect(c.ID())
 }
 

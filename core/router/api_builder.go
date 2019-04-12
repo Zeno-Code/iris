@@ -9,20 +9,18 @@ import (
 
 	"github.com/kataras/iris/context"
 	"github.com/kataras/iris/core/errors"
-	"github.com/kataras/iris/core/router/macro"
+	"github.com/kataras/iris/macro"
 )
 
-const (
-	// MethodNone is a Virtual method
-	// to store the "offline" routes.
-	MethodNone = "NONE"
-)
+// MethodNone is a Virtual method
+// to store the "offline" routes.
+const MethodNone = "NONE"
 
 var (
 	// AllMethods contains the valid http methods:
 	// "GET", "POST", "PUT", "DELETE", "CONNECT", "HEAD",
 	// "PATCH", "OPTIONS", "TRACE".
-	AllMethods = [...]string{
+	AllMethods = []string{
 		"GET",
 		"POST",
 		"PUT",
@@ -68,7 +66,7 @@ func (r *repository) getAll() []*Route {
 // and child routers.
 type APIBuilder struct {
 	// the api builder global macros registry
-	macros *macro.Map
+	macros *macro.Macros
 	// the api builder global handlers per status code registry (used for custom http errors)
 	errorCodeHandlers *ErrorCodeHandlers
 	// the api builder global routes repository
@@ -94,8 +92,9 @@ type APIBuilder struct {
 
 	// the per-party done handlers, order matters.
 	doneHandlers context.Handlers
-	// global done handlers, order doesn't matter
+	// global done handlers, order doesn't matter.
 	doneGlobalHandlers context.Handlers
+
 	// the per-party
 	relativePath string
 	// allowMethods are filled with the `AllowMethods` func.
@@ -103,6 +102,9 @@ type APIBuilder struct {
 	// per any party's (and its children) routes registered
 	// if the method "x" wasn't registered already via  the `Handle` (and its extensions like `Get`, `Post`...).
 	allowMethods []string
+
+	// the per-party (and its children) execution rules for begin, main and done handlers.
+	handlerExecutionRules ExecutionRules
 }
 
 var _ Party = (*APIBuilder)(nil)
@@ -112,7 +114,7 @@ var _ RoutesProvider = (*APIBuilder)(nil) // passed to the default request handl
 // which is responsible to build the API and the router handler.
 func NewAPIBuilder() *APIBuilder {
 	api := &APIBuilder{
-		macros:            defaultMacros(),
+		macros:            macro.Defaults,
 		errorCodeHandlers: defaultErrorCodeHandlers(),
 		reporter:          errors.NewReporter(),
 		relativePath:      "/",
@@ -150,6 +152,34 @@ func (api *APIBuilder) AllowMethods(methods ...string) Party {
 	return api
 }
 
+// SetExecutionRules alters the execution flow of the route handlers outside of the handlers themselves.
+//
+// For example, if for some reason the desired result is the (done or all) handlers to be executed no matter what
+// even if no `ctx.Next()` is called in the previous handlers, including the begin(`Use`),
+// the main(`Handle`) and the done(`Done`) handlers themselves, then:
+// Party#SetExecutionRules(iris.ExecutionRules {
+//   Begin: iris.ExecutionOptions{Force: true},
+//   Main:  iris.ExecutionOptions{Force: true},
+//   Done:  iris.ExecutionOptions{Force: true},
+// })
+//
+// Note that if : true then the only remained way to "break" the handler chain is by `ctx.StopExecution()` now that `ctx.Next()` does not matter.
+//
+// These rules are per-party, so if a `Party` creates a child one then the same rules will be applied to that as well.
+// Reset of these rules (before `Party#Handle`) can be done with `Party#SetExecutionRules(iris.ExecutionRules{})`.
+//
+// The most common scenario for its use can be found inside Iris MVC Applications;
+// when we want the `Done` handlers of that specific mvc app's `Party`
+// to be executed but we don't want to add `ctx.Next()` on the `OurController#EndRequest`.
+//
+// Returns this Party.
+//
+// Example: https://github.com/kataras/iris/tree/master/_examples/mvc/middleware/without-ctx-next
+func (api *APIBuilder) SetExecutionRules(executionRules ExecutionRules) Party {
+	api.handlerExecutionRules = executionRules
+	return api
+}
+
 // Handle registers a route to the server's api.
 // if empty method is passed then handler(s) are being registered to all methods, same as .Any.
 //
@@ -179,14 +209,28 @@ func (api *APIBuilder) Handle(method string, relativePath string, handlers ...co
 		return nil
 	}
 
-	// before join the middleware + handlers + done handlers.
-	possibleMainHandlerName := context.HandlerName(handlers[0])
+	// note: this can not change the caller's handlers as they're but the entry values(handlers)
+	// of `middleware`, `doneHandlers` and `handlers` can.
+	// So if we just put `api.middleware` or `api.doneHandlers`
+	// then the next `Party` will have those updated handlers
+	// but dev may change the rules for that child Party, so we have to make clones of them here.
+	var (
+		beginHandlers = joinHandlers(api.middleware, context.Handlers{})
+		doneHandlers  = joinHandlers(api.doneHandlers, context.Handlers{})
+	)
+
+	mainHandlers := context.Handlers(handlers)
+	// before join the middleware + handlers + done handlers and apply the execution rules.
+	possibleMainHandlerName := context.HandlerName(mainHandlers[0])
+
+	// TODO: for UseGlobal/DoneGlobal that doesn't work.
+	applyExecutionRules(api.handlerExecutionRules, &beginHandlers, &doneHandlers, &mainHandlers)
 
 	// global begin handlers -> middleware that are registered before route registration
 	// -> handlers that are passed to this Handle function.
-	routeHandlers := joinHandlers(api.middleware, handlers)
+	routeHandlers := joinHandlers(beginHandlers, mainHandlers)
 	// -> done handlers
-	routeHandlers = joinHandlers(routeHandlers, api.doneHandlers)
+	routeHandlers = joinHandlers(routeHandlers, doneHandlers)
 
 	// here we separate the subdomain and relative path
 	subdomain, path := splitSubdomainAndPath(fullpath)
@@ -200,7 +244,7 @@ func (api *APIBuilder) Handle(method string, relativePath string, handlers ...co
 	)
 
 	for _, m := range methods {
-		route, err = NewRoute(m, subdomain, path, possibleMainHandlerName, routeHandlers, api.macros)
+		route, err = NewRoute(m, subdomain, path, possibleMainHandlerName, routeHandlers, *api.macros)
 		if err != nil { // template path parser errors:
 			api.reporter.Add("%v -> %s:%s:%s", err, method, subdomain, path)
 			return nil // fail on first error.
@@ -224,10 +268,10 @@ func (api *APIBuilder) Handle(method string, relativePath string, handlers ...co
 // otherwise use `Party` which can handle many paths with different handlers and middlewares.
 //
 // Usage:
-// 	app.HandleMany("GET", "/user /user/{id:int} /user/me", genericUserHandler)
+// 	app.HandleMany("GET", "/user /user/{id:uint64} /user/me", genericUserHandler)
 // At the other side, with `Handle` we've had to write:
 // 	app.Handle("GET", "/user", userHandler)
-// 	app.Handle("GET", "/user/{id:int}", userByIDHandler)
+// 	app.Handle("GET", "/user/{id:uint64}", userByIDHandler)
 // 	app.Handle("GET", "/user/me", userMeHandler)
 //
 // This method is used behind the scenes at the `Controller` function
@@ -300,10 +344,11 @@ func (api *APIBuilder) Party(relativePath string, handlers ...context.Handler) P
 		doneGlobalHandlers:  api.doneGlobalHandlers,
 		reporter:            api.reporter,
 		// per-party/children
-		middleware:   middleware,
-		doneHandlers: api.doneHandlers[0:],
-		relativePath: fullpath,
-		allowMethods: allowMethods,
+		middleware:            middleware,
+		doneHandlers:          api.doneHandlers[0:],
+		relativePath:          fullpath,
+		allowMethods:          allowMethods,
+		handlerExecutionRules: api.handlerExecutionRules,
 	}
 }
 
@@ -364,11 +409,11 @@ func (api *APIBuilder) WildcardSubdomain(middleware ...context.Handler) Party {
 	return api.Subdomain(SubdomainWildcardIndicator, middleware...)
 }
 
-// Macros returns the macro map which is responsible
-// to register custom macro functions for all routes.
+// Macros returns the macro collection that is responsible
+// to register custom macros with their own parameter types and their macro functions for all routes.
 //
 // Learn more at:  https://github.com/kataras/iris/tree/master/_examples/routing/dynamic-path
-func (api *APIBuilder) Macros() *macro.Map {
+func (api *APIBuilder) Macros() *macro.Macros {
 	return api.macros
 }
 
@@ -390,6 +435,7 @@ func (api *APIBuilder) GetRoute(routeName string) *Route {
 // One note: "routeName" should be case-sensitive. Used by the context to get the current route.
 // It returns an interface instead to reduce wrong usage and to keep the decoupled design between
 // the context and the routes.
+// Look `GetRoutesReadOnly` to fetch a list of all registered routes.
 //
 // Look `GetRoute` for more.
 func (api *APIBuilder) GetRouteReadOnly(routeName string) context.RouteReadOnly {
@@ -398,6 +444,24 @@ func (api *APIBuilder) GetRouteReadOnly(routeName string) context.RouteReadOnly 
 		return nil
 	}
 	return routeReadOnlyWrapper{r}
+}
+
+// GetRoutesReadOnly returns the registered routes with "read-only" access,
+// you cannot and you should not change any of these routes' properties on request state,
+// you can use the `GetRoutes()` for that instead.
+//
+// It returns interface-based slice instead of the real ones in order to apply
+// safe fetch between context(request-state) and the builded application.
+//
+// Look `GetRouteReadOnly` too.
+func (api *APIBuilder) GetRoutesReadOnly() []context.RouteReadOnly {
+	routes := api.GetRoutes()
+	readOnlyRoutes := make([]context.RouteReadOnly, len(routes))
+	for i, r := range routes {
+		readOnlyRoutes[i] = routeReadOnlyWrapper{r}
+	}
+
+	return readOnlyRoutes
 }
 
 // Use appends Handler(s) to the current Party's routes and child routes.
@@ -456,12 +520,14 @@ func (api *APIBuilder) DoneGlobal(handlers ...context.Handler) {
 }
 
 // Reset removes all the begin and done handlers that may derived from the parent party via `Use` & `Done`,
-// note that the `Reset` will not reset the handlers that are registered via `UseGlobal` & `DoneGlobal`.
+// and the execution rules.
+// Note that the `Reset` will not reset the handlers that are registered via `UseGlobal` & `DoneGlobal`.
 //
 // Returns this Party.
 func (api *APIBuilder) Reset() Party {
 	api.middleware = api.middleware[0:0]
 	api.doneHandlers = api.doneHandlers[0:0]
+	api.handlerExecutionRules = ExecutionRules{}
 	return api
 }
 

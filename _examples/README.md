@@ -6,9 +6,52 @@ This folder provides easy to understand code snippets on how to get started with
 
 It doesn't always contain the "best ways" but it does cover each important feature that will make you so excited to GO with iris!
 
+## Running the examples
+
+1. Install the Go Programming Language, version 1.9+ from [here](https://golang.org/dl).
+2. Install Iris: `go get -u github.com/kataras/iris`
+3. Install any external packages that required by the examples
+
+<details>
+<summary>External packages</summary>
+
+```bash
+cd _examples && go get ./...
+# or
+go get github.com/iris-contrib/middleware/...
+go get github.com/betacraft/yaag/irisyaag
+go get github.com/markbates/goth/...
+go get github.com/casbin/casbin
+go get github.com/aws/aws-sdk-go/...
+go get github.com/getsentry/raven-go/...
+go get github.com/prometheus/client_golang/...
+go get github.com/didip/tollbooth
+go get github.com/valyala/quicktemplate
+go get github.com/shiyanhui/hero
+go get github.com/go-xorm/xorm
+go get github.com/nfnt/resize
+go get github.com/dgrijalva/jwt-go
+go get github.com/newrelic/go-agent
+go get github.com/valyala/tcplisten
+go get github.com/kataras/bindata/cmd/bindata
+go get github.com/jmespath/go-jmespath
+```
+
+</details>
+
+And execute
+
+```sh
+$ cd $GOPATH/src/github.com/kataras/iris/_examples/overview
+$ go run main.go
+```
+
+> Test the examples by opening a terminal window and execute: `GOCACHE=off && cd _examples && go test -v ./...`
+
 ### Overview
 
 - [Hello world!](hello-world/main.go)
+- [Hello WebAssemply!](webassembly/basic/main.go) **NEW**
 - [Glimpse](overview/main.go)
 - [Tutorial: Online Visitors](tutorial/online-visitors/main.go)
 - [Tutorial: A Todo MVC Application using Iris and Vue.js](https://hackernoon.com/a-todo-mvc-application-using-iris-and-vue-js-5019ff870064)
@@ -19,6 +62,7 @@ It doesn't always contain the "best ways" but it does cover each important featu
 - [Tutorial: DropzoneJS Uploader](tutorial/dropzonejs)
 - [Tutorial: Caddy](tutorial/caddy)
 - [Tutorial:Iris Go Framework + MongoDB](https://medium.com/go-language/iris-go-framework-mongodb-552e349eab9c)
+- [Tutorial: API for Apache Kafka](tutorial/api-for-apache-kafka) **NEW**
 
 ### Structuring
 
@@ -102,8 +146,10 @@ Navigate through examples for a better understanding.
 - [Custom HTTP Errors](routing/http-errors/main.go)
 - [Dynamic Path](routing/dynamic-path/main.go)
     * [root level wildcard path](routing/dynamic-path/root-wildcard/main.go)
+- [Write your own custom parameter types](routing/macros/main.go) **NEW**
 - [Reverse routing](routing/reverse/main.go)
-- [Custom wrapper](routing/custom-wrapper/main.go)
+- [Custom Router (high-level)](routing/custom-high-level-router/main.go) **NEW**
+- [Custom Wrapper](routing/custom-wrapper/main.go)
 - Custom Context
     * [method overriding](routing/custom-context/method-overriding/main.go)
     * [new implementation](routing/custom-context/new-implementation/main.go)
@@ -112,10 +158,17 @@ Navigate through examples for a better understanding.
     * [per-route](routing/writing-a-middleware/per-route/main.go)
     * [globally](routing/writing-a-middleware/globally/main.go)
 
+### Versioning
+
+- [How it works](https://github.com/kataras/iris/blob/master/versioning/README.md)
+- [Example](versioning/main.go)
+
 ### hero
 
 - [Basic](hero/basic/main.go)
 - [Overview](hero/overview)
+- [Sessions](hero/sessions) **NEW**
+- [Yet another dependency injection example and good practises at general](hero/smart-contract/main.go) **NEW**
 
 ### MVC
 
@@ -243,7 +296,7 @@ func(c *ExampleController) Get() string |
                                 mvc.Result or (mvc.Result, error)
 ```
 
-where [mvc.Result](https://github.com/kataras/iris/blob/master/mvc/func_result.go) is an interface which contains only that function: `Dispatch(ctx iris.Context)`.
+where [mvc.Result](https://github.com/kataras/iris/blob/master/mvc/go19.go#L10) is an [interface](https://github.com/kataras/iris/blob/master/hero/func_result.go#L18) which contains only that function: `Dispatch(ctx iris.Context)`.
 
 ## Using Iris MVC for code reuse
 
@@ -295,6 +348,10 @@ Follow the examples below,
 - [Inject Data Between Handlers](view/context-view-data/main.go)
 - [Embedding Templates Into App Executable File](view/embedding-templates-into-app/main.go)
 - [Write to a custom `io.Writer`](view/write-to)
+- [Greeting with Pug (Jade)`](view/template_pug_0)
+- [Pug (Jade) Actions`](view/template_pug_1)
+- [Pug (Jade) Includes`](view/template_pug_2)
+- [Pug (Jade) Extends`](view/template_pug_3)
 
 You can serve [quicktemplate](https://github.com/valyala/quicktemplate) and [hero templates](https://github.com/shiyanhui/hero/hero) files too, simply by using the `context#ResponseWriter`, take a look at the [http_responsewriter/quicktemplate](http_responsewriter/quicktemplate) and [http_responsewriter/herotemplate](http_responsewriter/herotemplate) examples.
 
@@ -320,12 +377,14 @@ You can serve [quicktemplate](https://github.com/valyala/quicktemplate) and [her
 ### How to Read from `context.Request() *http.Request`
 
 - [Read JSON](http_request/read-json/main.go)
+    * [Struct Validation](http_request/read-json-struct-validation/main.go)
 - [Read XML](http_request/read-xml/main.go)
 - [Read Form](http_request/read-form/main.go)
 - [Read Custom per type](http_request/read-custom-per-type/main.go)
 - [Read Custom via Unmarshaler](http_request/read-custom-via-unmarshaler/main.go)
 - [Upload/Read File](http_request/upload-file/main.go)
 - [Upload multiple files with an easy way](http_request/upload-files/main.go)
+- [Extract referrer from "referer" header or URL query parameter](http_request/extract-referer/main.go) **NEW**
 
 > The `context.Request()` returns the same *http.Request you already know, these examples show some places where the  Context uses this object. Besides that you can use it as you did before iris.
 
@@ -337,7 +396,8 @@ You can serve [quicktemplate](https://github.com/valyala/quicktemplate) and [her
 - [Write Gzip](http_responsewriter/write-gzip/main.go)
 - [Stream Writer](http_responsewriter/stream-writer/main.go)
 - [Transactions](http_responsewriter/transactions/main.go)
-- [SSE (third-party package usage for server-side events)](http_responsewriter/sse-third-party/main.go)
+- [SSE](http_responsewriter/sse/main.go) **NEW**
+- [SSE (third-party package usage for server sent events)](http_responsewriter/sse-third-party/main.go)
 
 > The `context/context#ResponseWriter()` returns an enchament version of a http.ResponseWriter, these examples show some places where the Context uses this object. Besides that you can use it as you did before iris.
 
@@ -391,6 +451,11 @@ iris cache library lives on its own [package](https://github.com/kataras/iris/tr
 
 > You're free to use your own favourite caching package if you'd like so.
 
+### Cookies
+
+- [Basic](cookies/basic/main.go)
+- [Encode/Decode (securecookie)](cookies/securecookie/main.go)
+
 ### Sessions
 
 iris session manager lives on its own [package](https://github.com/kataras/iris/tree/master/sessions).
@@ -401,6 +466,7 @@ iris session manager lives on its own [package](https://github.com/kataras/iris/
 - [Flash Messages](sessions/flash-messages/main.go)
 - [Databases](sessions/database)
     * [Badger](sessions/database/badger/main.go)
+    * [BoltDB](sessions/database/boltdb/main.go)
     * [Redis](sessions/database/redis/main.go)
 
 > You're free to use your own favourite sessions package if you'd like so.

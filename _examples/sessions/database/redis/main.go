@@ -32,8 +32,10 @@ func main() {
 	defer db.Close() // close the database connection if application errored.
 
 	sess := sessions.New(sessions.Config{
-		Cookie:  "sessionscookieid",
-		Expires: 45 * time.Minute}, // <=0 means unlimited life. Defaults to 0.
+		Cookie:       "sessionscookieid",
+		Expires:      45 * time.Minute, // <=0 means unlimited life. Defaults to 0.
+		AllowReclaim: true,
+	},
 	)
 
 	//
@@ -66,6 +68,24 @@ func main() {
 		ctx.Writef("All ok session value of the '%s' is: %s", key, s.GetString(key))
 	})
 
+	app.Get("/set/int/{key}/{value}", func(ctx iris.Context) {
+		key := ctx.Params().Get("key")
+		value, _ := ctx.Params().GetInt("value")
+		s := sess.Start(ctx)
+		// set session values
+		s.Set(key, value)
+		valueSet := s.Get(key)
+		// test if setted here
+		ctx.Writef("All ok session value of the '%s' is: %v", key, valueSet)
+	})
+
+	app.Get("/get/{key}", func(ctx iris.Context) {
+		key := ctx.Params().Get("key")
+		value := sess.Start(ctx).Get(key)
+
+		ctx.Writef("The '%s' on the /set was: %v", key, value)
+	})
+
 	app.Get("/get", func(ctx iris.Context) {
 		// get a specific key, as string, if no found returns just an empty string
 		name := sess.Start(ctx).GetString("name")
@@ -96,8 +116,19 @@ func main() {
 	})
 
 	app.Get("/update", func(ctx iris.Context) {
-		// updates expire date with a new date
-		sess.ShiftExpiration(ctx)
+		// updates resets the expiration based on the session's `Expires` field.
+		if err := sess.ShiftExpiration(ctx); err != nil {
+			if sessions.ErrNotFound.Equal(err) {
+				ctx.StatusCode(iris.StatusNotFound)
+			} else if sessions.ErrNotImplemented.Equal(err) {
+				ctx.StatusCode(iris.StatusNotImplemented)
+			} else {
+				ctx.StatusCode(iris.StatusNotModified)
+			}
+
+			ctx.Writef("%v", err)
+			ctx.Application().Logger().Error(err)
+		}
 	})
 
 	app.Run(iris.Addr(":8080"), iris.WithoutServerError(iris.ErrServerClosed))

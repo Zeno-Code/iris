@@ -23,8 +23,9 @@ func main() {
 	defer db.Close() // close and unlock the database if application errored.
 
 	sess := sessions.New(sessions.Config{
-		Cookie:  "sessionscookieid",
-		Expires: 45 * time.Minute, // <=0 means unlimited life. Defaults to 0.
+		Cookie:       "sessionscookieid",
+		Expires:      45 * time.Minute, // <=0 means unlimited life. Defaults to 0.
+		AllowReclaim: true,
 	})
 
 	//
@@ -87,8 +88,19 @@ func main() {
 	})
 
 	app.Get("/update", func(ctx iris.Context) {
-		// updates expire date with a new date
-		sess.ShiftExpiration(ctx)
+		// updates resets the expiration based on the session's `Expires` field.
+		if err := sess.ShiftExpiration(ctx); err != nil {
+			if sessions.ErrNotFound.Equal(err) {
+				ctx.StatusCode(iris.StatusNotFound)
+			} else if sessions.ErrNotImplemented.Equal(err) {
+				ctx.StatusCode(iris.StatusNotImplemented)
+			} else {
+				ctx.StatusCode(iris.StatusNotModified)
+			}
+
+			ctx.Writef("%v", err)
+			ctx.Application().Logger().Error(err)
+		}
 	})
 
 	app.Run(iris.Addr(":8080"), iris.WithoutServerError(iris.ErrServerClosed))

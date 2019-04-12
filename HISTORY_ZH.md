@@ -1,4 +1,4 @@
-# 更新记录 <a href="HISTORY.md"> <img width="20px" src="https://iris-go.com/images/flag-unitedkingdom.svg?v=10" /></a> <a href="HISTORY_GR.md"> <img width="20px" src="https://iris-go.com/images/flag-greece.svg?v=10" /></a>
+# 更新记录 <a href="HISTORY.md"> <img width="20px" src="https://iris-go.com/images/flag-unitedkingdom.svg?v=10" /></a> <a href="HISTORY_ID.md"> <img width="20px" src="https://iris-go.com/images/flag-indonesia.svg?v=10" /></a> <a href="HISTORY_GR.md"> <img width="20px" src="https://iris-go.com/images/flag-greece.svg?v=10" /></a>
 
 ### 想得到免费即时的支持?
 
@@ -16,6 +16,55 @@
 > Iris 使用 Golang 的 [vendor directory](https://docs.google.com/document/d/1Bz5-UB7g2uPBdOx-rw5t9MxJwkfpx90cqG9AFL0JAYo) 特性, 避免依赖包的更改带来影响。
 
 **如何升级**: 打开命令行执行以下命令: `go get -u github.com/kataras/iris` 或者等待自动更新。
+
+# Fr, 11 January 2019 | v11.1.1
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#fr-11-january-2019--v1111) instead.
+
+# Su, 18 November 2018 | v11.1.0
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#su-18-november-2018--v1110) instead.
+
+# Fr, 09 November 2018 | v11.0.4
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#fr-09-november-2018--v1104) instead.
+
+# Tu, 30 October 2018 | v11.0.2
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#tu-30-october-2018--v1102) instead.
+
+# Su, 28 October 2018 | v11.0.1
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#su-28-october-2018--v1101) instead.
+
+# Su, 21 October 2018 | v11.0.0
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#su-21-october-2018--v1100) instead.
+
+# Sat, 11 August 2018 | v10.7.0
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#sat-11-august-2018--v1070) instead.
+
+# Tu, 05 June 2018 | v10.6.6
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#tu-05-june-2018--v1066) instead.
+
+# Mo, 21 May 2018 | v10.6.5
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#mo-21-may-2018--v1065) instead.
+
+# We, 09 May 2018 | v10.6.4
+
+- [fix issue 995](https://github.com/kataras/iris/commit/62457279f41a1f157869a19ef35fb5198694fddb)
+- [fix issue 996](https://github.com/kataras/iris/commit/a11bb5619ab6b007dce15da9984a78d88cd38956)
+
+# We, 02 May 2018 | v10.6.3
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#we-02-may-2018--v1063) instead.
+
+# Tu, 01 May 2018 | v10.6.2
+
+This history entry is not translated yet to the Chinese language yet, please refer to the english version of the [HISTORY entry](https://github.com/kataras/iris/blob/master/HISTORY.md#tu-01-may-2018--v1062) instead.
 
 # 2018 4月25日 | v10.6.1 版本更新
 
@@ -54,7 +103,7 @@
 
 - 修正 `APIBuilder, Party#StaticWeb` 和 `APIBuilder, Party#StaticEmbedded` 子分组内的前缀错误
 - 保留 `iris, core/router#StaticEmbeddedHandler` 并移除 `core/router/APIBuilder#StaticEmbeddedHandler`,  (`Handler` 后缀) 这是全局性的，与 `Party` `APIBuilder` 无关。
-- 修正 路径 `{}` 中的路径清理 (我们已经在 [解释器](core/router/macro/interpreter) 级别转义了这些字符， 但是一些符号仍然被更高级别的API构建器删除) , 例如 `\\` 字符串的宏函数正则表达式内容 [927](https://github.com/kataras/iris/issues/927) by [commit e85b113476eeefffbc7823297cc63cd152ebddfd](https://github.com/kataras/iris/commit/e85b113476eeefffbc7823297cc63cd152ebddfd)
+- 修正 路径 `{}` 中的路径清理 (我们已经在 [解释器](macro/interpreter) 级别转义了这些字符， 但是一些符号仍然被更高级别的API构建器删除) , 例如 `\\` 字符串的宏函数正则表达式内容 [927](https://github.com/kataras/iris/issues/927) by [commit e85b113476eeefffbc7823297cc63cd152ebddfd](https://github.com/kataras/iris/commit/e85b113476eeefffbc7823297cc63cd152ebddfd)
 - 同步 `golang.org/x/sys/unix`
 
 ## 重要变更
